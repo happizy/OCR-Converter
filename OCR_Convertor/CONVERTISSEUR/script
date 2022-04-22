@@ -1,0 +1,86 @@
+#!/bin/bash
+
+#Auteur : Martin ROUXEL
+#Version 1.0
+
+if [ "$1" = "" ]
+then
+    echo "pas d'argument, veuillez entrer un nom de fichier à convertir."
+    exit 1
+else
+    rm final.txt #le fichier final est supprimé pour éviter que la nouvelle version ne contienne d'anciennes données
+    echo "récupération de l'image..."
+    docker image pull bigpapoo/tesseract 1> /dev/null
+    echo "fin de la récupération, début de la conversion."
+    folder=$(pwd)
+    docker container run --name docktess -tdi -v $folder/scriptvolume:/data/scriptvolume bigpapoo/tesseract sh 1> /dev/null #création d'un conteneur intéractif en arrière plan nommé docktess (pas de texte sur le terminal)
+    docker container exec docktess tesseract /data/scriptvolume/$1 /data/scriptvolume/result #conversion du fichier image passé en argument en fichier texte
+    echo "fin de la conversion, début du traitement de l'information."
+    egrep -v "{|}" scriptvolume/result.txt | cut -d":" -f2 | egrep "." > file.txt #conversion au format csv par filtres jusqu'à la ligne 26
+    while [ -s file.txt ]
+    do
+        for i in 1 2 3 4 5 6 #tant que le fichier à des lignes, copie chaque ligne sans \n six fois (nombre d'infos par ID)
+        do 
+            line=$(awk 'NR'==$i file.txt)
+            echo -n $line >> final.txt
+        done
+        sed -i '1,6d' file.txt
+        echo "" >> final.txt
+    done
+    cat final.txt | tr -d \" | tr -d "[“'\"]" > final2.txt
+    rm final.txt
+
+    line1=$(awk 'NR'==1 config.txt) 
+    line2=$(awk 'NR'==2 config.txt)
+    line3=$(awk 'NR'==3 config.txt)
+    line4=$(awk 'NR'==4 config.txt)
+    line5=$(awk 'NR'==5 config.txt)
+    line6=$(awk 'NR'==6 config.txt)
+    ID=$(echo $line1 | cut -d"=" -f2)
+    PRENOM=$(echo $line2 | cut -d"=" -f2)
+    NOM=$(echo $line3 | cut -d"=" -f2)
+    MAIL=$(echo $line4 | cut -d"=" -f2)
+    TEL=$(echo $line5 | cut -d"=" -f2)
+    ADR=$(echo $line6 | cut -d"=" -f2)
+    CLIENTIDE="${ID}${PRENOM}${NOM}${MAIL}${TEL}${ADR}" #variable str de 6bits (110011 par exemple) qui représente les options du fichier config.txt
+
+    varcut="" #variable finale vide à l'initialisation
+    for i in 1 2 3 4 5 6 #répète l'opération 6 fois (une pour chaque bit)
+    do
+    var=$(expr index "$CLIENTIDE" "1") #cherche l'index du premier "1" et le place dans var
+    if [ "$var" != "0" ] #si il y avait bien un 1
+    then
+        CLIENTIDE=$(echo $CLIENTIDE | sed s/./0/$var) #remplace le premier 1 par un 0
+        varcut="${varcut},${var}" #concaténation de la variable finale avec var (entrecoupé d'une virgule)
+    fi
+    done
+    varcut=$(echo $varcut | colrm 1 1) #retire la virgule en trop au début de la variable
+    cat final2.txt | cut -d"," -f$varcut > final.txt #le fichier final est créé
+    rm final2.txt
+
+    if [ "$2" != "" ] #vérification du motif en argument 2. Si-il y a un argument, il agit comme un motif egrep sur le fichier final
+    then
+        cat final.txt > final2.txt
+        egrep -i "$2" final2.txt > final.txt
+        rm final2.txt
+    fi
+    echo "traitement de l'information terminé, affichage du résultat."
+    sleep 3 #laisse le temps à l'utilisateur de lire avant l'affichage final
+
+    rm file.txt
+    echo "appuyez sur q pour fermer l'affichage !" >> final.txt #ajoute une ligne d'information pour l'utilisateur, qui sera retirée ensuite
+    less final.txt #affichage du fichier final
+    egrep -v "appuyez sur q" final.txt > final2.txt #retire la ligne explicative
+    cat final2.txt > final.txt
+    rm final2.txt
+
+    echo "attendez pendant que le conteneur se ferme !" #message suppliant l'utilisateur de ne rien faire tant que le conteneur n'est pas fermé et supprimé
+    docker container stop docktess 1> /dev/null #(pas d'affichage terminal)
+    docker container rm docktess 1> /dev/null #(pas d'affichage terminal)
+    echo "fin du script :^ )" #message jovial indiquant à l'utilisateur la fin de l'exécution du script
+fi
+
+
+
+
+
